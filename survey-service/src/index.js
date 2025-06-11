@@ -1,11 +1,10 @@
 const express = require('express');
 const db = require('./db');
-const { runConsumer } = require('./consumer');
+const kafka = require('./kafka'); // Import the new kafka manager
 
 const app = express();
 app.use(express.json());
 
-// Endpoint to see users in its own DB
 app.get('/users', async (req, res) => {
     try {
         const { rows } = await db.query('SELECT user_id, username FROM survey_users');
@@ -16,10 +15,18 @@ app.get('/users', async (req, res) => {
     }
 });
 
-// Start the Kafka consumer
-runConsumer().catch(console.error);
-
 const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Survey service listening on port ${PORT}`);
-});
+const startServer = async () => {
+    await kafka.connect();
+    app.listen(PORT, () => {
+      console.log(`Survey service listening on port ${PORT}`);
+    });
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+        await kafka.disconnect();
+        process.exit(0);
+    });
+};
+
+startServer();
