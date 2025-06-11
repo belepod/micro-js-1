@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('./db');
-const kafka = require('./kafka'); // Import the new kafka manager
+const kafka = require('./kafka');
 
 const app = express();
 app.use(express.json());
@@ -29,7 +29,6 @@ const startServer = async () => {
       console.log(`Survey service listening on port ${PORT}`);
     });
 
-    // Graceful shutdown
     process.on('SIGINT', async () => {
         await kafka.disconnect();
         process.exit(0);

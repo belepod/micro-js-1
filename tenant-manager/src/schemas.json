@@ -1,0 +1,16 @@
+{
+  "services": [
+    {
+      "name": "auth",
+      "db_host": "auth-db",
+      "db_name": "auth_db",
+      "ddl": "CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);"
+    },
+    {
+      "name": "survey",
+      "db_host": "survey-db",
+      "db_name": "survey_db",
+      "ddl": "CREATE TABLE survey_users (id SERIAL PRIMARY KEY, user_id INTEGER UNIQUE NOT NULL, username VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);"
+    }
+  ]
+}

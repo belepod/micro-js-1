@@ -71,6 +71,25 @@ services:
       timeout: 5s
       retries: 5
 
+  tenant-manager:
+    build: ./tenant-manager
+    container_name: tenant-manager
+    ports:
+      - "3003:3000" # Expose on a new port
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      survey-db:
+        condition: service_healthy
+    environment:
+      # It needs credentials to connect to ALL databases
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      # We provide the hosts as env vars, though they are hardcoded in schemas.json for this example.
+      # A more advanced setup would read these from the environment too.
+      AUTH_DB_HOST: auth-db
+      SURVEY_DB_HOST: survey-db
+
   auth-service:
     build: ./auth-service
     container_name: auth-service
