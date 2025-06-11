@@ -1,5 +1,9 @@
 version: '3.8'
 
+volumes:
+  auth_db_data:
+  survey_db_data:
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.2
@@ -32,9 +36,10 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: auth_db
-    # --- UPDATED VOLUME MAPPING TO USE A DEDICATED DIRECTORY ---
+    # --- UPDATED: Mount the init script and the named volume ---
     volumes:
       - ./init-db/auth:/docker-entrypoint-initdb.d
+      - auth_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d auth_db"]
       interval: 5s
@@ -50,9 +55,10 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: survey_db
-    # --- UPDATED VOLUME MAPPING TO USE A DEDICATED DIRECTORY ---
+    # --- UPDATED: Mount the init script and the named volume ---
     volumes:
       - ./init-db/survey:/docker-entrypoint-initdb.d
+      - survey_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d survey_db"]
       interval: 5s
