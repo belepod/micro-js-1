@@ -12,6 +12,7 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'auth-group' });
 
+const TENANT_CREATED_TOPIC = 'tenant-created';
 const USER_CREATED_TOPIC = 'user-created';
 const REPLY_TOPIC = 'user-creation-status';
 
@@ -27,8 +28,10 @@ const connect = async () => {
       const { correlationId, status } = event;
 
       if (pendingRequests.has(correlationId)) {
+        const { res, timeout } = pendingRequests.get(correlationId);
+        clearTimeout(timeout); // Very important: clear the timeout!
+        
         console.log(`[Auth Service] Received reply for ${correlationId}: ${status}`);
-        const { res } = pendingRequests.get(correlationId);
         
         if (status === 'SUCCESS') {
           res.status(200).json({ status: 'OK', message: 'User also created in survey service.' });
@@ -47,32 +50,50 @@ const disconnect = async () => {
   await consumer.disconnect();
 };
 
-const sendUserCreationRequest = async (newUser, res) => {
+const sendTenantCreationEvent = async (tenantId) => {
+  await producer.send({
+    topic: TENANT_CREATED_TOPIC,
+    messages: [{ value: JSON.stringify({ tenantId }) }],
+  });
+  console.log(`[Auth Service] Sent tenant-created event for ${tenantId}`);
+};
+
+const sendUserCreationRequest = async (tenantId, newUser, res) => {
+  // Add a debug log to be 100% sure the tenantId is arriving here
+  console.log(`[Auth Service] Preparing user creation request for tenant: ${tenantId}`);
+
   const correlationId = randomUUID();
   
-  // Store the response object and a timeout handler
   const timeout = setTimeout(() => {
     if (pendingRequests.has(correlationId)) {
         console.log(`[Auth Service] Request ${correlationId} timed out.`);
+        // Note: The 'res' here is closed over from the parent scope, which is correct.
         res.status(504).send('Request timed out while waiting for survey service.');
         pendingRequests.delete(correlationId);
     }
-  }, 10000); // 10-second timeout
+  }, 10000);
 
   pendingRequests.set(correlationId, { res, timeout });
 
+  // The payload is now built correctly, ensuring 'tenantId' is from the function argument.
+  const payload = {
+    tenantId: tenantId, 
+    ...newUser,
+    correlationId,
+    replyTopic: REPLY_TOPIC
+  };
+
   await producer.send({
     topic: USER_CREATED_TOPIC,
-    messages: [{ 
-      value: JSON.stringify({
-        ...newUser,
-        correlationId,
-        replyTopic: REPLY_TOPIC
-      }) 
-    }],
+    messages: [{ value: JSON.stringify(payload) }],
   });
 
   console.log(`[Auth Service] Sent user creation request for ${newUser.username} with correlationId ${correlationId}`);
 };
 
-module.exports = { connect, disconnect, sendUserCreationRequest };
+module.exports = { 
+  connect, 
+  disconnect, 
+  sendUserCreationRequest, 
+  sendTenantCreationEvent
+};
