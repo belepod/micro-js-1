@@ -1,7 +1,5 @@
 const { Kafka } = require('kafkajs');
-const { randomUUID } = require('crypto');
-
-const pendingRequests = new Map();
+const db = require('./db');
 
 const kafka = new Kafka({
   clientId: 'auth-service',
@@ -11,31 +9,30 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'auth-group' });
 
+const TENANT_CREATED_TOPIC = 'tenant-created';
 const USER_CREATED_TOPIC = 'user-created';
-const REPLY_TOPIC = 'user-creation-status';
 
 const connect = async () => {
   await producer.connect();
   await consumer.connect();
-
-  await consumer.subscribe({ topic: REPLY_TOPIC, fromBeginning: true });
+  await consumer.subscribe({ topics: [TENANT_CREATED_TOPIC], fromBeginning: true });
 
   await consumer.run({
-    eachMessage: async ({ message }) => {
-      const event = JSON.parse(message.value.toString());
-      const { correlationId, status } = event;
-
-      if (pendingRequests.has(correlationId)) {
-        const { res, timeout } = pendingRequests.get(correlationId);
-        clearTimeout(timeout);
-        
-        if (status === 'SUCCESS') {
-          res.status(200).json({ status: 'OK', message: 'User also created in survey service.' });
-        } else {
-          res.status(500).json({ status: 'FAILED', message: 'User creation failed in survey service.' });
+    eachMessage: async ({ topic, message }) => {
+      if (topic === TENANT_CREATED_TOPIC) {
+        const { tenantId } = JSON.parse(message.value.toString());
+        console.log(`[Auth Service] Received tenant-created event for: ${tenantId}`);
+        try {
+          const safeTenantId = db.escapeIdentifier(tenantId);
+          // The service now defines its OWN schema.
+          const createTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
+          
+          await db.adminQuery(`CREATE SCHEMA IF NOT EXISTS ${safeTenantId}`);
+          await db.query(tenantId, createTableSql, []);
+          console.log(`[Auth Service] Schema for tenant '${tenantId}' provisioned.`);
+        } catch (err) {
+          console.error(`[Auth Service] Failed to provision schema for tenant ${tenantId}:`, err);
         }
-        
-        pendingRequests.delete(correlationId);
       }
     },
   });
@@ -46,32 +43,18 @@ const disconnect = async () => {
   await consumer.disconnect();
 };
 
-const sendUserCreationRequest = async (tenantId, newUser, res) => {
-  const correlationId = randomUUID();
-  
-  const timeout = setTimeout(() => {
-    if (pendingRequests.has(correlationId)) {
-        console.log(`[Auth Service] Request ${correlationId} for tenant ${tenantId} timed out.`);
-        res.status(504).send('Request timed out while waiting for survey service.');
-        pendingRequests.delete(correlationId);
-    }
-  }, 10000); 
-
-  pendingRequests.set(correlationId, { res, timeout });
-
+const sendUserCreatedEvent = async (tenantId, newUser) => {
   await producer.send({
     topic: USER_CREATED_TOPIC,
     messages: [{ 
       value: JSON.stringify({
         tenantId,
-        ...newUser,
-        correlationId,
-        replyTopic: REPLY_TOPIC
+        id: newUser.id,
+        username: newUser.username,
       }) 
     }],
   });
-
-  console.log(`[Auth Service] Sent user creation request for ${newUser.username} (tenant: ${tenantId}) with correlationId ${correlationId}`);
+  console.log(`[Auth Service] Sent user-created event for ${newUser.username} (tenant: ${tenantId})`);
 };
 
-module.exports = { connect, disconnect, sendUserCreationRequest };
+module.exports = { connect, disconnect, sendUserCreatedEvent };

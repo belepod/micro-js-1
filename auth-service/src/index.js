@@ -5,12 +5,10 @@ const kafka = require('./kafka');
 const app = express();
 app.use(express.json());
 
-// The /tenants endpoint is now GONE from this service.
-
 app.post('/register', async (req, res) => {
   const tenantId = req.headers['x-tenant-id'];
   if (!tenantId) {
-      return res.status(400).send('X-Tenant-ID header is required.');
+    return res.status(400).send('X-Tenant-ID header is required.');
   }
 
   const { username, password } = req.body;
@@ -25,16 +23,26 @@ app.post('/register', async (req, res) => {
     );
     const newUser = result.rows[0];
 
-    await kafka.sendUserCreationRequest(tenantId, newUser, res);
+    // Fire and forget
+    await kafka.sendUserCreatedEvent(tenantId, newUser);
+    
+    // Immediately respond with 202 Accepted.
+    res.status(202).json({ 
+        status: "Pending", 
+        message: "User registration accepted and is being processed.",
+        user: newUser 
+    });
+
   } catch (err) {
     console.error(`Error registering user for tenant ${tenantId}:`, err);
     if (err.code === '42P01') { 
-        return res.status(404).send({ error: `Tenant '${tenantId}' does not exist or is not yet provisioned.` });
+        return res.status(404).send({ error: `Tenant '${tenantId}' does not exist.` });
     }
     res.status(500).send('Error registering user');
   }
 });
 
+// ... (GET /users and startServer remain the same) ...
 app.get('/users', async (req, res) => {
     const tenantId = req.headers['x-tenant-id'];
     if (!tenantId) {

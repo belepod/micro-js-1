@@ -3,6 +3,7 @@ version: '3.8'
 volumes:
   auth_db_data:
   survey_db_data:
+  tenant_db_data:
 
 services:
   zookeeper:
@@ -30,6 +31,24 @@ services:
     healthcheck:
       test: "cub kafka-ready -b kafka:9092 1"
       interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tenant-db: # New DB for the manager
+    image: postgres:14-alpine
+    container_name: tenant-db
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: tenant_db
+    volumes:
+      - ./init-db/tenant:/docker-entrypoint-initdb.d
+      - tenant_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d tenant_db"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
@@ -75,20 +94,18 @@ services:
     build: ./tenant-manager
     container_name: tenant-manager
     ports:
-      - "3003:3000" # Expose on a new port
+      - "3003:3000"
     depends_on:
-      auth-db:
+      tenant-db: # Depends on its own DB now
         condition: service_healthy
-      survey-db:
-        condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
-      # It needs credentials to connect to ALL databases
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
-      # We provide the hosts as env vars, though they are hardcoded in schemas.json for this example.
-      # A more advanced setup would read these from the environment too.
-      AUTH_DB_HOST: auth-db
-      SURVEY_DB_HOST: survey-db
+      POSTGRES_DB: tenant_db
+      POSTGRES_HOST: tenant-db # Connects to its own DB
+      KAFKA_BROKER: kafka:9092
 
   auth-service:
     build: ./auth-service
