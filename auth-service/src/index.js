@@ -8,7 +8,7 @@ app.use(express.json());
 app.post('/register', async (req, res) => {
   const tenantId = req.headers['x-tenant-id'];
   if (!tenantId) {
-    return res.status(400).send('X-Tenant-ID header is required.');
+      return res.status(400).send('X-Tenant-ID header is required.');
   }
 
   const { username, password } = req.body;
@@ -23,15 +23,10 @@ app.post('/register', async (req, res) => {
     );
     const newUser = result.rows[0];
 
-    // Fire and forget
-    await kafka.sendUserCreatedEvent(tenantId, newUser);
+    // Call the request-reply function. It will handle the response.
+    await kafka.sendUserCreationRequest(tenantId, newUser, res);
     
-    // Immediately respond with 202 Accepted.
-    res.status(202).json({ 
-        status: "Pending", 
-        message: "User registration accepted and is being processed.",
-        user: newUser 
-    });
+    // DO NOT send a response here. kafka.js will do it when the reply arrives.
 
   } catch (err) {
     console.error(`Error registering user for tenant ${tenantId}:`, err);
@@ -42,7 +37,6 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// ... (GET /users and startServer remain the same) ...
 app.get('/users', async (req, res) => {
     const tenantId = req.headers['x-tenant-id'];
     if (!tenantId) {

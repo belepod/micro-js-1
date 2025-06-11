@@ -1,5 +1,9 @@
 const { Kafka } = require('kafkajs');
+const { randomUUID } = require('crypto');
 const db = require('./db');
+
+// Map to hold pending HTTP requests waiting for a reply
+const pendingRequests = new Map();
 
 const kafka = new Kafka({
   clientId: 'auth-service',
@@ -9,16 +13,20 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'auth-group' });
 
+// Define our topics
 const TENANT_CREATED_TOPIC = 'tenant-created';
 const USER_CREATED_TOPIC = 'user-created';
+const REPLY_TOPIC = 'processing-status'; // The "reply" topic
 
 const connect = async () => {
   await producer.connect();
   await consumer.connect();
-  await consumer.subscribe({ topics: [TENANT_CREATED_TOPIC], fromBeginning: true });
+  // Subscribe to BOTH tenant creation AND replies
+  await consumer.subscribe({ topics: [TENANT_CREATED_TOPIC, REPLY_TOPIC], fromBeginning: true });
 
   await consumer.run({
     eachMessage: async ({ topic, message }) => {
+      // --- Handle Tenant Creation (as before) ---
       if (topic === TENANT_CREATED_TOPIC) {
         const { tenantId } = JSON.parse(message.value.toString());
         console.log(`[Auth Service] Received tenant-created event for: ${tenantId}`);
@@ -33,6 +41,27 @@ const connect = async () => {
         } catch (err) {
           console.error(`[Auth Service] Failed to provision schema for tenant ${tenantId}:`, err);
         }
+        return;
+      }
+      
+      // --- Handle Replies for User Creation ---
+      if (topic === REPLY_TOPIC) {
+        const event = JSON.parse(message.value.toString());
+        const { correlationId, status } = event;
+
+        if (pendingRequests.has(correlationId)) {
+          const { res, timeout } = pendingRequests.get(correlationId);
+          clearTimeout(timeout); // Very important: prevent the timeout from firing
+          
+          if (status === 'SUCCESS') {
+            res.status(201).json({ status: 'Completed', message: 'User created successfully in all services.' });
+          } else {
+            res.status(500).json({ status: 'Failed', message: 'User creation failed in a downstream service.' });
+          }
+          pendingRequests.delete(correlationId);
+        } else {
+            console.log(`[Auth Service] Received reply for timed-out or unknown request: ${correlationId}`);
+        }
       }
     },
   });
@@ -43,7 +72,19 @@ const disconnect = async () => {
   await consumer.disconnect();
 };
 
-const sendUserCreatedEvent = async (tenantId, newUser) => {
+const sendUserCreationRequest = async (tenantId, newUser, res) => {
+  const correlationId = randomUUID();
+
+  const timeout = setTimeout(() => {
+    if (pendingRequests.has(correlationId)) {
+      console.log(`[Auth Service] Request ${correlationId} timed out.`);
+      res.status(504).send({ error: 'Request timed out waiting for downstream service confirmation.' });
+      pendingRequests.delete(correlationId);
+    }
+  }, 15000); // 15-second timeout
+
+  pendingRequests.set(correlationId, { res, timeout });
+
   await producer.send({
     topic: USER_CREATED_TOPIC,
     messages: [{ 
@@ -51,10 +92,12 @@ const sendUserCreatedEvent = async (tenantId, newUser) => {
         tenantId,
         id: newUser.id,
         username: newUser.username,
+        correlationId,
+        replyTopic: REPLY_TOPIC,
       }) 
     }],
   });
-  console.log(`[Auth Service] Sent user-created event for ${newUser.username} (tenant: ${tenantId})`);
+  console.log(`[Auth Service] Sent user-creation request for ${newUser.username} with correlationId ${correlationId}`);
 };
 
-module.exports = { connect, disconnect, sendUserCreatedEvent };
+module.exports = { connect, disconnect, sendUserCreationRequest };
