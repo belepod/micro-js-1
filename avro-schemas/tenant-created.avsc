@@ -1,0 +1,10 @@
+{
+  "type": "record",
+  "name": "TenantCreated",
+  "namespace": "com.mycompany.events",
+  "fields": [
+    { "name": "tenantId", "type": "string" },
+    { "name": "createdBy", "type": "string", "default": "system" },
+    { "name": "address", "type": "string", "default": "system" }
+  ]
+}

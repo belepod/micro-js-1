@@ -1,4 +1,5 @@
 const { Kafka } = require('kafkajs');
+const { SchemaRegistry } = require('@kafkajs/confluent-schema-registry');
 const { randomUUID } = require('crypto');
 const db = require('./db');
 
@@ -13,6 +14,14 @@ const kafka = new Kafka({
 // We need both a producer (for user creation) and a consumer (for all events)
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'auth-group' });
+
+const registry = new SchemaRegistry({ host: process.env.SCHEMA_REGISTRY_URL });
+//const userCreatedSchema = require('../avro-schemas/user-created.avsc');
+const fs = require('fs');
+const path = require('path');
+
+const schemaPath = path.join(__dirname, '../avro-schemas/user-created.avsc');
+const userCreatedSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
 
 // --- Define all topics this service interacts with ---
 const TENANT_CREATED_TOPIC = 'tenant-created';
@@ -38,12 +47,22 @@ const connect = async () => {
 
   await consumer.run({
     eachMessage: async ({ topic, message }) => {
-      const event = JSON.parse(message.value.toString());
-
+            let event;
+      try {
+        // We decode the message payload right away.
+        event = await registry.decode(message.value);
+        if (!event) { // Handle potential null payloads from tombstone messages
+            console.log(`[Auth Service] Received empty message on topic ${topic}. Skipping.`);
+            return;
+        }
+      } catch (e) {
+        console.error(`[Auth Service] Failed to decode message on topic ${topic}:`, e);
+        return; // Stop processing this malformed message
+      }
       // --- Handle Tenant Creation ---
       if (topic === TENANT_CREATED_TOPIC) {
-        const { tenantId } = event;
-        console.log(`[Auth Service] Received tenant-created event for: ${tenantId}`);
+        const { tenantId, createdBy, address } = event;
+        console.log(`[Auth Service] Received tenant-created event for: ${tenantId} (Created By: ${createdBy}) and (address: ${address})`);
         try {
           const safeTenantId = db.escapeIdentifier(tenantId);
           const createTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
@@ -122,19 +141,29 @@ const sendUserCreationRequest = async (tenantId, newUser, res) => {
 
   pendingRequests.set(correlationId, { res, timeout });
 
+
+    const message = {
+    tenantId,
+    id: newUser.id,
+    username: newUser.username,
+    correlationId,
+    replyTopic: REPLY_TOPIC,
+  };
+  
+  // Get the ID for our schema from the registry.
+  const { id: schemaId } = await registry.register(
+    { type: 'AVRO', schema: JSON.stringify(userCreatedSchema) },
+    { subject: `${USER_CREATED_TOPIC}-value` }
+  );
+
+  // ENCODE the message before sending.
+  const encodedPayload = await registry.encode(schemaId, message);
+
   await producer.send({
     topic: USER_CREATED_TOPIC,
-    messages: [{ 
-      value: JSON.stringify({
-        tenantId,
-        id: newUser.id,
-        username: newUser.username,
-        correlationId,
-        replyTopic: REPLY_TOPIC,
-      }) 
-    }],
+    messages: [{ value: encodedPayload }],
   });
-  console.log(`[Auth Service] Sent user-creation request for ${newUser.username} with correlationId ${correlationId}`);
+  console.log(`[Auth Service] Sent ENCODED user-creation request for ${newUser.username}`);
 };
 
 module.exports = { connect, disconnect, sendUserCreationRequest };

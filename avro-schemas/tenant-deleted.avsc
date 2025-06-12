@@ -1,0 +1,8 @@
+{
+  "type": "record",
+  "name": "TenantDeleted",
+  "namespace": "com.mycompany.events",
+  "fields": [
+    { "name": "tenantId", "type": "string" }
+  ]
+}

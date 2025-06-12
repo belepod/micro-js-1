@@ -1,0 +1,9 @@
+{
+  "type": "record",
+  "name": "ProcessingStatus",
+  "namespace": "com.mycompany.events",
+  "fields": [
+    { "name": "correlationId", "type": "string" },
+    { "name": "status", "type": "string" }
+  ]
+}

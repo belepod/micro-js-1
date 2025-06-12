@@ -6,37 +6,33 @@ const app = express();
 app.use(express.json());
 
 app.post('/tenants', async (req, res) => {
-    const { tenantId } = req.body;
+    const { tenantId, createdBy, address} = req.body;
     if (!tenantId || !/^[a-z0-9_]+$/.test(tenantId)) {
         return res.status(400).send('Invalid tenantId. Use lowercase letters, numbers, and underscores only.');
     }
 
     try {
-        // Step 1: Save the tenant to its own database.
         await db.query('INSERT INTO tenants (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING', [tenantId]);
 
-        // Step 2: Publish a generic event. The manager's job is done.
-        await kafka.sendTenantCreatedEvent(tenantId);
+        await kafka.sendTenantCreatedEvent(tenantId, createdBy, address || 'system');
+        //await kafka.sendTenantCreatedEvent(tenantId);
         
-        res.status(202).send({ message: `Tenant creation request for '${tenantId}' accepted and is being processed.` });
+        res.status(202).send({ message: `Tenant creation request for '${tenantId}' accepted.` });
     } catch (err) {
         console.error('Error creating tenant:', err);
         res.status(500).send('Failed to accept tenant creation request.');
     }
 });
-// --- NEW ENDPOINT: Delete a Tenant ---
 app.delete('/tenants/:tenantId', async (req, res) => {
     const { tenantId } = req.params;
 
     try {
-        // Step 1: Delete from the master list.
         const result = await db.query('DELETE FROM tenants WHERE tenant_id = $1', [tenantId]);
 
         if (result.rowCount === 0) {
             return res.status(404).send({ error: `Tenant '${tenantId}' not found.` });
         }
 
-        // Step 2: Publish the event for other services to act upon.
         await kafka.sendTenantDeletedEvent(tenantId);
 
         res.status(202).send({ message: `Tenant '${tenantId}' deletion accepted.` });
@@ -46,7 +42,6 @@ app.delete('/tenants/:tenantId', async (req, res) => {
     }
 });
 
-// --- NEW ENDPOINT: Rename a Tenant ---
 app.put('/tenants/:tenantId', async (req, res) => {
     const { tenantId: oldTenantId } = req.params;
     const { newTenantId } = req.body;
@@ -59,7 +54,6 @@ app.put('/tenants/:tenantId', async (req, res) => {
     }
 
     try {
-        // Step 1: Update the master list.
         const result = await db.query('UPDATE tenants SET tenant_id = $1 WHERE tenant_id = $2', [newTenantId, oldTenantId]);
 
         if (result.rowCount === 0) {

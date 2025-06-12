@@ -1,4 +1,5 @@
 const { Kafka } = require('kafkajs');
+const { SchemaRegistry } = require('@kafkajs/confluent-schema-registry');
 const db = require('./db');
 
 const kafka = new Kafka({
@@ -10,7 +11,16 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'survey-group' });
 
-// --- Define all topics this service interacts with ---
+const registry = new SchemaRegistry({ host: process.env.SCHEMA_REGISTRY_URL });
+
+//const processingStatusSchema = require('../avro-schemas/processing-status.avsc');
+
+const fs = require('fs');
+const path = require('path');
+
+const schemaPath = path.join(__dirname, '../avro-schemas/processing-status.avsc');
+const processingStatusSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+
 const TENANT_CREATED_TOPIC = 'tenant-created';
 const TENANT_DELETED_TOPIC = 'tenant-deleted';
 const TENANT_RENAMED_TOPIC = 'tenant-renamed';
@@ -33,8 +43,17 @@ const connect = async () => {
 
   await consumer.run({
     eachMessage: async ({ topic, message }) => {
-      const event = JSON.parse(message.value.toString());
-
+            let event;
+      try {
+        event = await registry.decode(message.value);
+        if (!event) {
+            console.log(`[Survey Service] Received empty message on topic ${topic}. Skipping.`);
+            return;
+        }
+      } catch (e) {
+        console.error(`[Survey Service] Failed to decode message on topic ${topic}:`, e);
+        return;
+      }
       // --- Handle Tenant Creation ---
       if (topic === TENANT_CREATED_TOPIC) {
         const { tenantId } = event;
@@ -94,11 +113,23 @@ const connect = async () => {
           status = 'FAILURE';
         }
 
+                const replyMessage = { correlationId, status };
+        
+        // Register the reply schema
+        const { id: schemaId } = await registry.register(
+            { type: 'AVRO', schema: JSON.stringify(processingStatusSchema) },
+            { subject: `${replyTopic}-value` } // e.g., 'processing-status-value'
+        );
+        
+        // ENCODE the reply payload
+        const encodedReply = await registry.encode(schemaId, replyMessage);
+
+
         await producer.send({
             topic: replyTopic,
-            messages: [{ value: JSON.stringify({ correlationId, status }) }]
+            messages: [{ value: encodedReply }]
         });
-        console.log(`[Survey Service] Sent reply for ${correlationId} with status ${status}`);
+                console.log(`[Survey Service] Sent ENCODED reply for ${correlationId}`);
       }
     },
   });

@@ -1,0 +1,9 @@
+{
+  "type": "record",
+  "name": "TenantRenamed",
+  "namespace": "com.mycompany.events",
+  "fields": [
+    { "name": "oldTenantId", "type": "string" },
+    { "name": "newTenantId", "type": "string" }
+  ]
+}

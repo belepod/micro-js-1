@@ -2,9 +2,14 @@ FROM node:18-alpine
 
 WORKDIR /usr/src/app
 
-COPY package*.json ./
+# Copy package.json from the specific service directory first for caching
+COPY tenant-manager/package*.json ./
 RUN npm install
 
-COPY . .
+# Copy the service's source code
+COPY tenant-manager/src ./src
+
+# --- NEW: Explicitly copy the shared schemas ---
+COPY avro-schemas ./avro-schemas
 
 CMD [ "npm", "start" ]

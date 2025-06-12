@@ -34,6 +34,19 @@ services:
       timeout: 5s
       retries: 5
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.3.2
+    container_name: schema-registry
+    hostname: schema-registry
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:9092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
   tenant-db: # New DB for the manager
     image: postgres:14-alpine
     container_name: tenant-db
@@ -91,7 +104,9 @@ services:
       retries: 5
 
   tenant-manager:
-    build: ./tenant-manager
+    build:
+      context: .
+      dockerfile: tenant-manager/Dockerfile
     container_name: tenant-manager
     ports:
       - "3003:3000"
@@ -106,9 +121,12 @@ services:
       POSTGRES_DB: tenant_db
       POSTGRES_HOST: tenant-db # Connects to its own DB
       KAFKA_BROKER: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
 
   auth-service:
-    build: ./auth-service
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
     container_name: auth-service
     ports:
       - "3001:3000"
@@ -123,9 +141,12 @@ services:
       POSTGRES_DB: auth_db
       POSTGRES_HOST: auth-db
       KAFKA_BROKER: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
 
   survey-service:
-    build: ./survey-service
+    build:
+      context: .
+      dockerfile: survey-service/Dockerfile
     container_name: survey-service
     ports:
       - "3002:3000"
@@ -140,3 +161,4 @@ services:
       POSTGRES_DB: survey_db
       POSTGRES_HOST: survey-db
       KAFKA_BROKER: kafka:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
