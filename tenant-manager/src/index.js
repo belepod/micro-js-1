@@ -73,6 +73,19 @@ app.put('/tenants/:tenantId', async (req, res) => {
         res.status(500).send('Failed to accept tenant rename request.');
     }
 });
+
+app.get('/tenants', async (req, res) => {
+    try {
+        const { rows } = await db.query('SELECT tenant_id FROM tenants');
+        // Extract the tenant_id from each row object and return a simple array of strings
+        const tenantIds = rows.map(row => row.tenant_id);
+        res.status(200).json(tenantIds);
+    } catch (err) {
+        console.error('Error fetching tenants:', err);
+        res.status(500).send({ error: 'Failed to fetch tenants list.' });
+    }
+});
+
 const PORT = 3000;
 const startServer = async () => {
     await kafka.connect();

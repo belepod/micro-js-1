@@ -142,6 +142,7 @@ services:
       POSTGRES_HOST: auth-db
       KAFKA_BROKER: kafka:9092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      TENANT_MANAGER_URL: http://tenant-manager:3000
 
   survey-service:
     build:

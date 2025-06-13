@@ -2,6 +2,7 @@ const { Kafka } = require('kafkajs');
 const { SchemaRegistry } = require('@kafkajs/confluent-schema-registry');
 const { randomUUID } = require('crypto');
 const db = require('./db');
+const axios = require('axios');
 
 // This map holds pending HTTP requests for the Request-Reply pattern
 const pendingRequests = new Map();
@@ -20,9 +21,16 @@ const registry = new SchemaRegistry({ host: process.env.SCHEMA_REGISTRY_URL });
 const fs = require('fs');
 const path = require('path');
 
-const schemaPath = path.join(__dirname, '../avro-schemas/user-created.avsc');
-const userCreatedSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+//const schemaPath = path.join(__dirname, '../avro-schemas/user-created.avsc');
+//const userCreatedSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+const userCreatedSchema = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../avro-schemas/user-created.avsc'), 'utf-8')
+);
+const migrationSchemaV2 = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../avro-schemas/auth-db-migration-v2.avsc'), 'utf-8')
+);
 
+const MIGRATION_TOPIC_V2 = 'auth-db-migration-v2';
 // --- Define all topics this service interacts with ---
 const TENANT_CREATED_TOPIC = 'tenant-created';
 const TENANT_DELETED_TOPIC = 'tenant-deleted';
@@ -40,7 +48,8 @@ const connect = async () => {
       TENANT_CREATED_TOPIC, 
       TENANT_DELETED_TOPIC, 
       TENANT_RENAMED_TOPIC, 
-      REPLY_TOPIC // Don't forget the reply topic!
+      REPLY_TOPIC,
+      MIGRATION_TOPIC_V2
     ], 
     fromBeginning: true 
   });
@@ -65,7 +74,7 @@ const connect = async () => {
         console.log(`[Auth Service] Received tenant-created event for: ${tenantId} (Created By: ${createdBy}) and ()`);
         try {
           const safeTenantId = db.escapeIdentifier(tenantId);
-          const createTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
+          const createTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, name VARCHAR(255), created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
           await db.adminQuery(`CREATE SCHEMA IF NOT EXISTS ${safeTenantId}`);
           await db.query(tenantId, createTableSql, []);
           console.log(`[Auth Service] Schema for tenant '${tenantId}' provisioned.`);
@@ -104,6 +113,33 @@ const connect = async () => {
         return;
       }
 
+      if (topic === MIGRATION_TOPIC_V2) {
+        console.log('[Auth Service] Received request to start DB schema v2 migration.');
+        try {
+          // 1. Get all tenants from the tenant-manager
+          const response = await axios.get(`${process.env.TENANT_MANAGER_URL}/tenants`);
+          const allTenants = response.data; // This should be an array like ["acme", "stark"]
+          console.log(`[Auth Service] Found ${allTenants.length} tenants to migrate.`);
+
+          // 2. Loop through each tenant and apply the migration
+          for (const tenantId of allTenants) {
+            try {
+              // Using "IF NOT EXISTS" makes the script safe to run multiple times (idempotent)
+              const alterSql = `ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);`;
+              await db.query(tenantId, alterSql, []);
+              console.log(`[Auth Service] >>>> Successfully migrated tenant '${tenantId}' to DB schema v2.`);
+            } catch (err) {
+              // Log the error for the specific tenant but continue with the rest
+              console.error(`[Auth Service] >>>> FAILED to migrate tenant '${tenantId}':`, err.message);
+            }
+          }
+          console.log('[Auth Service] DB migration v2 process completed for all tenants.');
+        } catch (err) {
+          // This catches critical errors, like not being able to reach the tenant-manager
+          console.error('[Auth Service] CRITICAL failure during migration process:', err.message);
+        }
+        return;
+      }
       // --- Handle Replies for User Creation ---
       if (topic === REPLY_TOPIC) {
         const { correlationId, status } = event;
@@ -166,4 +202,28 @@ const sendUserCreationRequest = async (tenantId, newUser, res) => {
   console.log(`[Auth Service] Sent ENCODED user-creation request for ${newUser.username} using new 'userId' field`);
 };
 
-module.exports = { connect, disconnect, sendUserCreationRequest };
+const sendMigrationEvent = async () => {
+  const eventPayload = {
+    description: 'Trigger migration to add "name" column to users table.',
+    triggeredAt: new Date().toISOString()
+  };
+  
+  const subject = `${MIGRATION_TOPIC_V2}-value`;
+
+  // Register and get the schema ID
+  const { id: schemaId } = await registry.register(
+    { type: 'AVRO', schema: JSON.stringify(migrationSchemaV2) },
+    { subject }
+  );
+
+  // Encode the payload before sending
+  const encodedPayload = await registry.encode(schemaId, eventPayload);
+
+  await producer.send({
+    topic: MIGRATION_TOPIC_V2,
+    messages: [{ value: encodedPayload }], // <-- SEND THE ENCODED PAYLOAD
+  });
+  console.log('[Auth Service] Published ENCODED migration event to start DB schema v2 update.');
+};
+
+module.exports = { connect, disconnect, sendUserCreationRequest, sendMigrationEvent };

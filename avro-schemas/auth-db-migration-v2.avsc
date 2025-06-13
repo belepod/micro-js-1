@@ -1,0 +1,9 @@
+{
+  "type": "record",
+  "name": "AuthDbMigrationV2",
+  "namespace": "com.mycompany.events.internal",
+  "fields": [
+    { "name": "description", "type": "string" },
+    { "name": "triggeredAt", "type": "string" }
+  ]
+}

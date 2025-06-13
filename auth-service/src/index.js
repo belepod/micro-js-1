@@ -51,6 +51,22 @@ app.get('/users', async (req, res) => {
     }
 });
 
+app.post('/admin/migrations/run', async (req, res) => {
+    // SECURITY In a real-world application, this endpoint MUST be protected
+    // and only accessible to administrators.
+    try {
+        // This just publishes the event. The actual work happens in the consumer.
+        await kafka.sendMigrationEvent();
+        res.status(202).send({ 
+            message: "Database migration process for all tenants has been initiated. Check service logs for progress." 
+        });
+    } catch (err) {
+        console.error("Failed to trigger migration event:", err);
+        res.status(500).send({ error: "Could not start migration process." });
+    }
+});
+
+
 const PORT = 3000;
 const startServer = async () => {
     await kafka.connect();
