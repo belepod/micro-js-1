@@ -45,8 +45,8 @@ const disconnect = async () => {
 
 // --- Updated functions with schema registration and encoding ---
 
-const sendTenantCreatedEvent = async (tenantId, createdBy, address) => {
-  const message = { tenantId, createdBy, address };
+const sendTenantCreatedEvent = async (tenantId, createdBy, address, ceo, country) => {
+  const message = { tenantId, createdBy, address, ceo, country };
   const { id: schemaId } = await registry.register(
     { type: 'AVRO', schema: JSON.stringify(tenantCreatedSchema) },
     { subject: `${TENANT_CREATED_TOPIC}-value` }

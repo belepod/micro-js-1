@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 
 app.post('/tenants', async (req, res) => {
-    const { tenantId, createdBy, address} = req.body;
+    const { tenantId, createdBy, address, ceo, country} = req.body;
     if (!tenantId || !/^[a-z0-9_]+$/.test(tenantId)) {
         return res.status(400).send('Invalid tenantId. Use lowercase letters, numbers, and underscores only.');
     }
@@ -14,7 +14,7 @@ app.post('/tenants', async (req, res) => {
     try {
         await db.query('INSERT INTO tenants (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING', [tenantId]);
 
-        await kafka.sendTenantCreatedEvent(tenantId, createdBy, address || 'system');
+        await kafka.sendTenantCreatedEvent(tenantId, createdBy, address, ceo, country || 'system');
         //await kafka.sendTenantCreatedEvent(tenantId);
         
         res.status(202).send({ message: `Tenant creation request for '${tenantId}' accepted.` });

@@ -5,6 +5,8 @@
   "fields": [
     { "name": "tenantId", "type": "string" },
     { "name": "createdBy", "type": "string", "default": "system" },
-    { "name": "address", "type": "string", "default": "system" }
+    { "name": "address", "type": "string", "default": "system" },
+    { "name": "ceo", "type": "string", "default": "system" },
+    { "name": "country", "type": "string", "default": "system" }
   ]
 }
