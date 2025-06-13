@@ -101,11 +101,11 @@ const connect = async () => {
 
       // --- Handle User Creation and Send Reply ---
       if (topic === USER_CREATED_TOPIC) {
-        const { tenantId, id, username, correlationId, replyTopic } = event;
+        const { tenantId, userId, username, correlationId, replyTopic } = event;
         let status = 'FAILURE';
         
         try {
-          await db.query(tenantId, 'INSERT INTO survey_users(user_id, username) VALUES($1, $2)', [id, username]);
+          await db.query(tenantId, 'INSERT INTO survey_users(user_id, username) VALUES($1, $2)', [userId, username]);
           console.log(`[Survey Service] User ${username} processed successfully for tenant ${tenantId}.`);
           status = 'SUCCESS';
         } catch (err) {

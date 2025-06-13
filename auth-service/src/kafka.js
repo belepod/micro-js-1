@@ -62,7 +62,7 @@ const connect = async () => {
       // --- Handle Tenant Creation ---
       if (topic === TENANT_CREATED_TOPIC) {
         const { tenantId, createdBy, address } = event;
-        console.log(`[Auth Service] Received tenant-created event for: ${tenantId} (Created By: ${createdBy}) and (address: ${address})`);
+        console.log(`[Auth Service] Received tenant-created event for: ${tenantId} (Created By: ${createdBy}) and ()`);
         try {
           const safeTenantId = db.escapeIdentifier(tenantId);
           const createTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
@@ -144,7 +144,7 @@ const sendUserCreationRequest = async (tenantId, newUser, res) => {
 
     const message = {
     tenantId,
-    id: newUser.id,
+    userId: newUser.id,
     username: newUser.username,
     correlationId,
     replyTopic: REPLY_TOPIC,
@@ -163,7 +163,7 @@ const sendUserCreationRequest = async (tenantId, newUser, res) => {
     topic: USER_CREATED_TOPIC,
     messages: [{ value: encodedPayload }],
   });
-  console.log(`[Auth Service] Sent ENCODED user-creation request for ${newUser.username}`);
+  console.log(`[Auth Service] Sent ENCODED user-creation request for ${newUser.username} using new 'userId' field`);
 };
 
 module.exports = { connect, disconnect, sendUserCreationRequest };

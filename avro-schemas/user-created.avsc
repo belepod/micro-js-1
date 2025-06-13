@@ -4,7 +4,11 @@
   "namespace": "com.mycompany.events",
   "fields": [
     { "name": "tenantId", "type": "string" },
-    { "name": "id", "type": "int" },
+    { 
+      "name": "userId", 
+      "type": "int",
+      "aliases": ["id"] 
+    },
     { "name": "username", "type": "string" },
     { "name": "correlationId", "type": "string" },
     { "name": "replyTopic", "type": "string" }
