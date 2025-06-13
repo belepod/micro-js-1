@@ -11,15 +11,15 @@ app.post('/register', async (req, res) => {
       return res.status(400).send('X-Tenant-ID header is required.');
   }
 
-  const { username, password } = req.body;
+  const { username, password, name } = req.body;
   if (!username || !password) {
     return res.status(400).send('Username and password are required');
   }
 
   try {
     const result = await db.query(tenantId,
-      'INSERT INTO users(username, password) VALUES($1, $2) RETURNING id, username',
-      [username, password]
+      'INSERT INTO users(username, password, name) VALUES($1, $2, $3) RETURNING id, username',
+      [username, password, name]
     );
     const newUser = result.rows[0];
 
