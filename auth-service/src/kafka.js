@@ -29,6 +29,9 @@ const userCreatedSchema = JSON.parse(
 const migrationSchemaV2 = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../avro-schemas/auth-db-migration-v2.avsc'), 'utf-8')
 );
+const dbTaskRequestedSchema = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../avro-schemas/db-task-requested.avsc'), 'utf-8')
+);
 
 const MIGRATION_TOPIC_V2 = 'auth-db-migration-v2';
 // --- Define all topics this service interacts with ---
@@ -37,6 +40,7 @@ const TENANT_DELETED_TOPIC = 'tenant-deleted';
 const TENANT_RENAMED_TOPIC = 'tenant-renamed';
 const USER_CREATED_TOPIC = 'user-created';
 const REPLY_TOPIC = 'processing-status';
+const DB_TASK_REQUESTED_TOPIC = 'db-task-requested';
 
 const connect = async () => {
   await producer.connect();
@@ -49,7 +53,8 @@ const connect = async () => {
       TENANT_DELETED_TOPIC, 
       TENANT_RENAMED_TOPIC, 
       REPLY_TOPIC,
-      MIGRATION_TOPIC_V2
+      MIGRATION_TOPIC_V2,
+      DB_TASK_REQUESTED_TOPIC
     ], 
     fromBeginning: true 
   });
@@ -140,6 +145,18 @@ const connect = async () => {
         }
         return;
       }
+
+if (topic === DB_TASK_REQUESTED_TOPIC) {
+    // Check if this task is for me
+    if (event.serviceName !== 'auth-service') {
+        return; // Not my problem, ignore it
+    }
+    console.log(`[Auth Service] Received a DB task request: ${event.taskType}`);
+    await handleDbTask(event);
+    return;
+}
+
+
       // --- Handle Replies for User Creation ---
       if (topic === REPLY_TOPIC) {
         const { correlationId, status } = event;
@@ -226,4 +243,76 @@ const sendMigrationEvent = async () => {
   console.log('[Auth Service] Published ENCODED migration event to start DB schema v2 update.');
 };
 
-module.exports = { connect, disconnect, sendUserCreationRequest, sendMigrationEvent };
+// --- NEW HELPER FUNCTION: The heart of the migration logic ---
+async function handleDbTask(task) {
+    let tenantsToMigrate = [];
+    if (task.tenantId) {
+        // A specific tenant is targeted
+        tenantsToMigrate.push(task.tenantId);
+        console.log(`> Task will run for specific tenant: ${task.tenantId}`);
+    } else {
+        // Target all tenants
+        console.log(`> Task will run for ALL tenants.`);
+        const response = await axios.get(`${process.env.TENANT_MANAGER_URL}/tenants`);
+        tenantsToMigrate = response.data;
+    }
+
+    // Dynamically build the SQL based on the task type
+    let sql = '';
+    switch (task.taskType) {
+        case 'ADD_TABLE':
+            sql = task.tableDdl; // e.g., CREATE TABLE new_table (...)
+            break;
+        case 'RENAME_TABLE':
+            sql = `ALTER TABLE ${db.escapeIdentifier(task.tableName)} RENAME TO ${db.escapeIdentifier(task.newTableName)};`;
+            break;
+        case 'DROP_TABLE':
+            sql = `DROP TABLE IF EXISTS ${db.escapeIdentifier(task.tableName)};`;
+            break;
+        case 'ADD_COLUMN':
+            sql = `ALTER TABLE ${db.escapeIdentifier(task.tableName)} ADD COLUMN IF NOT EXISTS ${db.escapeIdentifier(task.columnName)} ${task.columnDefinition};`;
+            break;
+        case 'RENAME_COLUMN':
+            sql = `ALTER TABLE ${db.escapeIdentifier(task.tableName)} RENAME COLUMN ${db.escapeIdentifier(task.columnName)} TO ${db.escapeIdentifier(task.newColumnName)};`;
+            break;
+        case 'DROP_COLUMN':
+            sql = `ALTER TABLE ${db.escapeIdentifier(task.tableName)} DROP COLUMN IF EXISTS ${db.escapeIdentifier(task.columnName)};`;
+            break;
+        default:
+            console.error(`> Unknown task type: ${task.taskType}`);
+            return;
+    }
+
+    console.log(`> Executing SQL: ${sql}`);
+
+    // Loop and run the SQL for each targeted tenant
+    for (const tenantId of tenantsToMigrate) {
+        try {
+            await db.query(tenantId, sql, []);
+            console.log(`>> SUCCESS on tenant '${tenantId}'`);
+        } catch (err) {
+            console.error(`>> FAILED on tenant '${tenantId}':`, err.message);
+        }
+    }
+    console.log('> DB Task processing finished.');
+}
+
+
+// --- NEW Publisher function in kafka.js ---
+const sendDbTaskEvent = async (taskPayload) => {
+    const subject = `${DB_TASK_REQUESTED_TOPIC}-value`;
+    const { id: schemaId } = await registry.register(
+        { type: 'AVRO', schema: JSON.stringify(dbTaskRequestedSchema) },
+        { subject }
+    );
+    const encodedPayload = await registry.encode(schemaId, taskPayload);
+    await producer.send({
+        topic: DB_TASK_REQUESTED_TOPIC,
+        messages: [{ value: encodedPayload }],
+    });
+    console.log('[Auth Service] Published db-task-requested event.');
+};
+
+
+
+module.exports = { connect, disconnect, sendUserCreationRequest, sendMigrationEvent, sendDbTaskEvent };

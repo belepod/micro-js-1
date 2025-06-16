@@ -66,6 +66,22 @@ app.post('/admin/migrations/run', async (req, res) => {
     }
 });
 
+// The single, powerful endpoint
+app.post('/admin/migrations/run-task', async (req, res) => {
+    // This endpoint now acts as a simple gateway to publish the task event.
+    // The real work happens in the consumer.
+    // NOTE: Add validation here to ensure the payload is well-formed.
+    const taskPayload = req.body;
+    try {
+        await kafka.sendDbTaskEvent(taskPayload);
+        res.status(202).send({ message: `DB Task of type '${taskPayload.taskType}' has been initiated. Check service logs.` });
+    } catch (err) {
+        console.error("Failed to trigger DB Task event:", err);
+        res.status(500).send({ error: "Could not start DB Task process." });
+    }
+});
+
+
 
 const PORT = 3000;
 const startServer = async () => {
