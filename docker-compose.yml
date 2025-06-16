@@ -4,6 +4,7 @@ volumes:
   auth_db_data:
   survey_db_data:
   tenant_db_data:
+  tenant_uploads:
 
 services:
   zookeeper:
@@ -121,6 +122,8 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
       ADMIN_USER: admin
       ADMIN_PASSWORD: password123
+    volumes:
+      - tenant_uploads:/usr/src/app/uploads
 
   auth-service:
     build:

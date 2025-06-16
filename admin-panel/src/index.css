@@ -17,3 +17,4 @@ th { background-color: #f2f2f2; }
 .form-grid label { display: block; font-weight: bold; margin-bottom: 0.5rem; }
 .form-grid input { width: 100%; box-sizing: border-box; }
 .full-width { grid-column: 1 / -1; }
+.details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; }

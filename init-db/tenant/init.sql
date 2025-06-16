@@ -6,7 +6,7 @@ DROP TABLE IF EXISTS tenants;
 CREATE TABLE tenants (
     tenant_id VARCHAR(50) PRIMARY KEY,
     organization_name VARCHAR(255) NOT NULL,
-    logo_url VARCHAR(512),
+    logo_url TEXT,
     subdomain VARCHAR(100) UNIQUE,
     address TEXT,
     timezone VARCHAR(100),

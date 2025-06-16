@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchTenants, createTenant, deleteTenant, renameTenant } from '../api';
 import CreateTenantForm from './CreateTenantForm';
+import { Link } from 'react-router-dom';
 
 function DashboardPage() {
     const [tenants, setTenants] = useState([]);
@@ -79,6 +80,9 @@ function DashboardPage() {
                             <td className="actions">
                                 <button onClick={() => handleRename(tenant.tenant_id)}>Rename</button>
                                 <button className="delete-btn" onClick={() => handleDelete(tenant.tenant_id)}>Delete</button>
+                            </td>
+                            <td>
+                                 <Link to={`/tenants/${tenant.tenant_id}`}>{tenant.tenant_id}</Link>
                             </td>
                         </tr>
                     ))}

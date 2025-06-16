@@ -1,42 +1,49 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 function CreateTenantForm({ onSubmit }) {
-    const [formData, setFormData] = useState({
-        tenantId: '', organizationName: '', logoUrl: '', subdomain: '',
-        address: '', timezone: '', currency: '',
-        username: '', password: ''
-    });
-
-    const handleChange = (e) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
-    };
+    // No more local state! The form submit will handle everything.
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        // Create a FormData object from the form element
+        const formData = new FormData(e.target);
         onSubmit(formData);
     };
 
     return (
         <div className="form-container" style={{ marginTop: '2rem' }}>
             <h3>New Tenant Details</h3>
-            <form onSubmit={handleSubmit} className="form-grid">
+            <form onSubmit={handleSubmit} className="form-grid" encType="multipart/form-data">
                 {/* Tenant Info */}
-                <div><label>Tenant ID*</label><input name="tenantId" onChange={handleChange} required /></div>
-                <div><label>Organization Name*</label><input name="organizationName" onChange={handleChange} required /></div>
-                <div><label>Logo URL</label><input name="logoUrl" onChange={handleChange} /></div>
-                <div><label>Desired Subdomain</label><input name="subdomain" onChange={handleChange} /></div>
-                <div><label>Address</label><input name="address" onChange={handleChange} /></div>
-                <div><label>Timezone</label><input name="timezone" onChange={handleChange} /></div>
-                <div><label>Currency (e.g., USD)</label><input name="currency" onChange={handleChange} /></div>
-                <div />
+                <div><label>Tenant ID*</label><input name="tenantId" required /></div>
+                <div><label>Organization Name*</label><input name="organizationName" required /></div>
+                
+                {/* --- LOGO UPLOAD LOGIC --- */}
+                <div className="full-width">
+                    <p><strong>Logo:</strong> Provide a URL or upload a file.</p>
+                </div>
+                <div>
+                    <label>Logo from URL</label>
+                    <input name="logoUrl" placeholder="https://example.com/logo.png" />
+                </div>
+                <div>
+                    <label>Or Upload Logo File</label>
+                    {/* The name 'logo' must match the multer middleware on the backend */}
+                    <input name="logo" type="file" />
+                </div>
+
+                <div><label>Desired Subdomain</label><input name="subdomain" /></div>
+                <div><label>Address</label><input name="address" /></div>
+                <div><label>Timezone</label><input name="timezone" /></div>
+                <div><label>Currency</label><input name="currency" /></div>
 
                 {/* Initial User Info */}
                 <div className="full-width"><h3>Initial Admin User for Tenant</h3></div>
-                <div><label>Username*</label><input name="username" onChange={handleChange} required /></div>
-                <div><label>Password*</label><input name="password" type="password" onChange={handleChange} required /></div>
+                <div><label>Username*</label><input name="username" required /></div>
+                <div><label>Password*</label><input name="password" type="password" required /></div>
                 
                 <div className="full-width">
-                    <button type="submit">Create Tenant and User</button>
+                    <button type="submit">Create Tenant</button>
                 </div>
             </form>
         </div>
