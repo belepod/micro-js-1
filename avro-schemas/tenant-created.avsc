@@ -4,9 +4,7 @@
   "namespace": "com.mycompany.events",
   "fields": [
     { "name": "tenantId", "type": "string" },
-    { "name": "createdBy", "type": "string", "default": "system" },
-    { "name": "address", "type": "string", "default": "system" },
-    { "name": "ceo", "type": "string", "default": "system" },
-    { "name": "country", "type": "string", "default": "system" }
+    { "name": "initialUsername", "type": ["null", "string"], "default": null },
+    { "name": "initialPassword", "type": ["null", "string"], "default": null }
   ]
 }

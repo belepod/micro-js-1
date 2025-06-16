@@ -1,6 +1,6 @@
 const { Pool } = require('pg');
 
-// This service now only connects to its own database.
+// Create a single connection pool for the tenant_manager's own database.
 const pool = new Pool({
   user: process.env.POSTGRES_USER,
   host: process.env.POSTGRES_HOST,
@@ -9,6 +9,8 @@ const pool = new Pool({
   port: 5432,
 });
 
+// Export a 'query' function and the 'pool' itself so we can get clients for transactions.
 module.exports = {
   query: (text, params) => pool.query(text, params),
+  pool: pool // Export the pool object
 };

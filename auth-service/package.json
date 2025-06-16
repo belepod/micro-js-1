@@ -10,6 +10,7 @@
     "kafkajs": "^2.2.4",
     "@kafkajs/confluent-schema-registry": "^3.9.0",
     "pg": "^8.11.3",
-    "axios": "^0.28.0"
+    "axios": "^0.28.0",
+    "bcrypt": "^6.0.0"
   }
 }

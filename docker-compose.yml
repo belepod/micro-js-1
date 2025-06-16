@@ -27,7 +27,6 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-    # --- THIS IS THE KEY FIX ---
     healthcheck:
       test: "cub kafka-ready -b kafka:9092 1"
       interval: 10s
@@ -47,7 +46,7 @@ services:
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:9092'
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
 
-  tenant-db: # New DB for the manager
+  tenant-db:
     image: postgres:14-alpine
     container_name: tenant-db
     ports:
@@ -61,7 +60,7 @@ services:
       - tenant_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d tenant_db"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
 
@@ -74,7 +73,6 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: auth_db
-    # --- UPDATED: Mount the init script and the named volume ---
     volumes:
       - ./init-db/auth:/docker-entrypoint-initdb.d
       - auth_db_data:/var/lib/postgresql/data
@@ -93,7 +91,6 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: survey_db
-    # --- UPDATED: Mount the init script and the named volume ---
     volumes:
       - ./init-db/survey:/docker-entrypoint-initdb.d
       - survey_db_data:/var/lib/postgresql/data
@@ -111,7 +108,7 @@ services:
     ports:
       - "3003:3000"
     depends_on:
-      tenant-db: # Depends on its own DB now
+      tenant-db: 
         condition: service_healthy
       kafka:
         condition: service_started
@@ -119,9 +116,11 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: tenant_db
-      POSTGRES_HOST: tenant-db # Connects to its own DB
+      POSTGRES_HOST: tenant-db 
       KAFKA_BROKER: kafka:9092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: password123
 
   auth-service:
     build:
@@ -163,3 +162,13 @@ services:
       POSTGRES_HOST: survey-db
       KAFKA_BROKER: kafka:9092
       SCHEMA_REGISTRY_URL: http://schema-registry:8081
+
+  admin-panel:
+    build:
+      context: ./admin-panel
+      dockerfile: Dockerfile
+    container_name: admin-panel
+    ports:
+      - "80:80" # Map host port 80 to container port 80
+    depends_on:
+      - tenant-manager # Optional, but good practice to ensure backend is up

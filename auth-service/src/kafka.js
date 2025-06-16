@@ -1,6 +1,7 @@
 const { Kafka } = require('kafkajs');
 const { SchemaRegistry } = require('@kafkajs/confluent-schema-registry');
 const { randomUUID } = require('crypto');
+const bcrypt = require('bcrypt'); // <-- Import bcrypt
 const db = require('./db');
 const axios = require('axios');
 
@@ -61,30 +62,42 @@ const connect = async () => {
 
   await consumer.run({
     eachMessage: async ({ topic, message }) => {
-            let event;
-      try {
-        // We decode the message payload right away.
-        event = await registry.decode(message.value);
-        if (!event) { // Handle potential null payloads from tombstone messages
-            console.log(`[Auth Service] Received empty message on topic ${topic}. Skipping.`);
-            return;
-        }
-      } catch (e) {
-        console.error(`[Auth Service] Failed to decode message on topic ${topic}:`, e);
-        return; // Stop processing this malformed message
-      }
-      // --- Handle Tenant Creation ---
+      // Decode the message using the schema registry
+      const event = await registry.decode(message.value).catch(e => console.error(e));
+      if (!event) return;
+
+      // --- THE NEW, POWERFUL TENANT-CREATED HANDLER ---
       if (topic === TENANT_CREATED_TOPIC) {
-        const { tenantId, createdBy, address } = event;
-        console.log(`[Auth Service] Received tenant-created event for: ${tenantId} (Created By: ${createdBy}) and ()`);
+        const { tenantId, initialUsername, initialPassword } = event;
+        console.log(`[Auth Service] Received tenant-created event for: ${tenantId}`);
+
         try {
           const safeTenantId = db.escapeIdentifier(tenantId);
-          const createTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, name VARCHAR(255), created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
+
+          // 1. Create the schema
           await db.adminQuery(`CREATE SCHEMA IF NOT EXISTS ${safeTenantId}`);
-          await db.query(tenantId, createTableSql, []);
-          console.log(`[Auth Service] Schema for tenant '${tenantId}' provisioned.`);
+          console.log(`> Schema '${tenantId}' created.`);
+
+          // 2. Create the standard 'users' table
+          const createUsersTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
+          await db.query(tenantId, createUsersTableSql, []);
+          console.log(`> Table 'users' created for tenant '${tenantId}'.`);
+
+          // 3. Create the new 'superusers' table
+          const createSuperusersTableSql = `CREATE TABLE superusers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
+          await db.query(tenantId, createSuperusersTableSql, []);
+          console.log(`> Table 'superusers' created for tenant '${tenantId}'.`);
+
+          // 4. If initial user details are provided, create the superuser
+          if (initialUsername && initialPassword) {
+            const saltRounds = 10;
+            const hashedPassword = await bcrypt.hash(initialPassword, saltRounds);
+            const insertSuperuserSql = 'INSERT INTO superusers (username, password) VALUES ($1, $2)';
+            await db.query(tenantId, insertSuperuserSql, [initialUsername, hashedPassword]);
+            console.log(`> Initial superuser '${initialUsername}' created for tenant '${tenantId}'.`);
+          }
         } catch (err) {
-          console.error(`[Auth Service] Failed to provision schema for tenant ${tenantId}:`, err);
+          console.error(`[Auth Service] FAILED to provision schema/user for tenant ${tenantId}:`, err);
         }
         return;
       }

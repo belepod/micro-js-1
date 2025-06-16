@@ -45,18 +45,21 @@ const disconnect = async () => {
 
 // --- Updated functions with schema registration and encoding ---
 
-const sendTenantCreatedEvent = async (tenantId, createdBy, address, ceo, country) => {
-  const message = { tenantId, createdBy, address, ceo, country };
-  const { id: schemaId } = await registry.register(
-    { type: 'AVRO', schema: JSON.stringify(tenantCreatedSchema) },
-    { subject: `${TENANT_CREATED_TOPIC}-value` }
-  );
-  const encodedPayload = await registry.encode(schemaId, message);
-  await producer.send({
-    topic: TENANT_CREATED_TOPIC,
-    messages: [{ value: encodedPayload }],
-  });
-  console.log(`[Tenant Manager] Published ENCODED tenant-created event for: ${tenantId}`);
+const sendTenantCreatedEvent = async (tenantId, initialUsername, initialPassword) => {
+    const subject = `${TENANT_CREATED_TOPIC}-value`;
+    const payload = { tenantId, initialUsername, initialPassword };
+
+    const { id: schemaId } = await registry.register(
+        { type: 'AVRO', schema: JSON.stringify(tenantCreatedSchema) },
+        { subject }
+    );
+    const encodedPayload = await registry.encode(schemaId, payload);
+
+    await producer.send({
+        topic: TENANT_CREATED_TOPIC,
+        messages: [{ value: encodedPayload }],
+    });
+    console.log(`[Tenant Manager] Published tenant-created event for: ${tenantId} with initial user info.`);
 };
 
 const sendTenantDeletedEvent = async (tenantId) => {

@@ -18,8 +18,8 @@ app.post('/register', async (req, res) => {
 
   try {
     const result = await db.query(tenantId,
-      'INSERT INTO users(username, password, name) VALUES($1, $2, $3) RETURNING id, username',
-      [username, password, name]
+      'INSERT INTO users(username, password) VALUES($1, $2) RETURNING id, username',
+      [username, password]
     );
     const newUser = result.rows[0];
 
