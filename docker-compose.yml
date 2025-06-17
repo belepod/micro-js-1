@@ -75,7 +75,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: auth_db
     volumes:
-      - ./init-db/auth:/docker-entrypoint-initdb.d
+      - ./auth-service/init.sql:/docker-entrypoint-initdb.d/init.sql
       - auth_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d auth_db"]
@@ -93,7 +93,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: survey_db
     volumes:
-      - ./init-db/survey:/docker-entrypoint-initdb.d
+      - ./survey-service/init.sql:/docker-entrypoint-initdb.d/init.sql
       - survey_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d survey_db"]

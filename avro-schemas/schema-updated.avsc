@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "SchemaUpdated",
+  "namespace": "com.mycompany.events.admin",
+  "fields": [
+    { 
+      "name": "serviceName", 
+      "type": "string", 
+      "doc": "The service whose schema has been updated and needs to be reconciled (e.g., 'auth-service')" 
+    }
+  ]
+}

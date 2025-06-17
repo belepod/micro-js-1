@@ -5,7 +5,6 @@ const bcrypt = require('bcrypt'); // <-- Import bcrypt
 const db = require('./db');
 const axios = require('axios');
 
-// This map holds pending HTTP requests for the Request-Reply pattern
 const pendingRequests = new Map();
 
 const kafka = new Kafka({
@@ -13,17 +12,13 @@ const kafka = new Kafka({
   brokers: [process.env.KAFKA_BROKER],
 });
 
-// We need both a producer (for user creation) and a consumer (for all events)
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'auth-group' });
 
 const registry = new SchemaRegistry({ host: process.env.SCHEMA_REGISTRY_URL });
-//const userCreatedSchema = require('../avro-schemas/user-created.avsc');
 const fs = require('fs');
 const path = require('path');
 
-//const schemaPath = path.join(__dirname, '../avro-schemas/user-created.avsc');
-//const userCreatedSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
 const userCreatedSchema = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../avro-schemas/user-created.avsc'), 'utf-8')
 );
@@ -35,7 +30,6 @@ const dbTaskRequestedSchema = JSON.parse(
 );
 
 const MIGRATION_TOPIC_V2 = 'auth-db-migration-v2';
-// --- Define all topics this service interacts with ---
 const TENANT_CREATED_TOPIC = 'tenant-created';
 const TENANT_DELETED_TOPIC = 'tenant-deleted';
 const TENANT_RENAMED_TOPIC = 'tenant-renamed';
@@ -43,11 +37,109 @@ const USER_CREATED_TOPIC = 'user-created';
 const REPLY_TOPIC = 'processing-status';
 const DB_TASK_REQUESTED_TOPIC = 'db-task-requested';
 
+
+function buildCreateTableSql(tableDefinition) {
+    const { table_name, columns } = tableDefinition;
+    let primaryKeys = [];
+    const columnParts = columns.map(col => {
+        let part = `${db.escapeIdentifier(col.column_name)} ${col.data_type}`;
+        if (!col.is_nullable) part += ' NOT NULL';
+        if (col.default) part += ` DEFAULT ${col.default}`;
+        if (col.is_unique) part += ' UNIQUE';
+        if (col.is_primary_key) primaryKeys.push(db.escapeIdentifier(col.column_name));
+        return part;
+    });
+
+    if (primaryKeys.length > 0) {
+        columnParts.push(`PRIMARY KEY (${primaryKeys.join(', ')})`);
+    }
+
+    return `CREATE TABLE ${db.escapeIdentifier(table_name)} (${columnParts.join(', ')});`;
+}
+
+
+/**
+ * The full, state-diffing reconciler. This function compares the desired state
+ * in the 'root' schema with the actual state in the tenant's schema and
+ * generates CREATE/ALTER/DROP statements to make them match.
+ */
+async function reconcileTenantSchema(tenantId) {
+    console.log(`[Reconciler] Starting full schema reconciliation for tenant: ${tenantId}`);
+    const safeTenantId = db.escapeIdentifier(tenantId);
+    
+    // 1. Ensure the tenant schema itself exists.
+    await db.adminQuery(`CREATE SCHEMA IF NOT EXISTS ${safeTenantId}`);
+    
+    // 2. Fetch the DESIRED state from our 'root' schema.
+    const tablesResult = await db.query('root', 'SELECT * FROM root.schema_tables', []);
+    const columnsResult = await db.query('root', 'SELECT * FROM root.schema_columns ORDER BY id', []);
+    
+    const desiredTables = new Map(tablesResult.rows.map(table => [
+        table.table_name, 
+        { ...table, columns: columnsResult.rows.filter(c => c.table_name === table.table_name) }
+    ]));
+
+    // 3. Fetch the ACTUAL state from the live tenant's schema.
+    const actualTablesResult = await db.adminQuery(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = $1",
+        [tenantId]
+    );
+    const actualTables = new Set(actualTablesResult.rows.map(r => r.table_name));
+
+    // --- RECONCILIATION LOGIC ---
+
+    // A) Loop through what SHOULD exist (desired state).
+    for (const [tableName, tableDef] of desiredTables.entries()) {
+        if (!actualTables.has(tableName)) {
+            // Table is missing, so create it completely.
+            const createSql = buildCreateTableSql(tableDef);
+            await db.query(tenantId, createSql, []);
+            console.log(`> [Reconciler] CREATED missing table '${tableName}' for tenant '${tenantId}'.`);
+        } else {
+            // Table exists, so we must check its columns.
+            const actualColsResult = await db.adminQuery(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+                [tenantId, tableName]
+            );
+            const actualCols = new Set(actualColsResult.rows.map(r => r.column_name));
+            const desiredCols = new Set(tableDef.columns.map(c => c.column_name));
+
+            // Find and ADD missing columns.
+            for (const colDef of tableDef.columns) {
+                if (!actualCols.has(colDef.column_name)) {
+                    const addColSql = `ALTER TABLE ${safeTenantId}.${db.escapeIdentifier(tableName)} ADD COLUMN ${db.escapeIdentifier(colDef.column_name)} ${colDef.data_type};`;
+                    await db.adminQuery(addColSql);
+                    console.log(`> [Reconciler] ADDED missing column '${colDef.column_name}' to table '${tableName}' for tenant '${tenantId}'.`);
+                }
+            }
+            
+            // Find and DROP extra columns.
+            for (const colName of actualCols) {
+                if (!desiredCols.has(colName)) {
+                     const dropColSql = `ALTER TABLE ${safeTenantId}.${db.escapeIdentifier(tableName)} DROP COLUMN ${db.escapeIdentifier(colName)};`;
+                     await db.adminQuery(dropColSql);
+                     console.log(`> [Reconciler] DROPPED extra column '${colName}' from table '${tableName}' for tenant '${tenantId}'.`);
+                }
+            }
+        }
+    }
+    
+    // B) Loop through what ACTUALLY exists to find tables that need to be dropped.
+    for (const tableName of actualTables) {
+        if (!desiredTables.has(tableName)) {
+            const dropTableSql = `DROP TABLE ${safeTenantId}.${db.escapeIdentifier(tableName)};`;
+            await db.adminQuery(dropTableSql);
+            console.log(`> [Reconciler] DROPPED extra table '${tableName}' from tenant '${tenantId}'.`);
+        }
+    }
+
+    console.log(`[Reconciler] Finished schema reconciliation for tenant: ${tenantId}`);
+}
+
 const connect = async () => {
   await producer.connect();
   await consumer.connect();
   
-  // Subscribe to all relevant topics
   await consumer.subscribe({ 
     topics: [
       TENANT_CREATED_TOPIC, 
@@ -62,47 +154,29 @@ const connect = async () => {
 
   await consumer.run({
     eachMessage: async ({ topic, message }) => {
-      // Decode the message using the schema registry
       const event = await registry.decode(message.value).catch(e => console.error(e));
       if (!event) return;
 
-      // --- THE NEW, POWERFUL TENANT-CREATED HANDLER ---
       if (topic === TENANT_CREATED_TOPIC) {
         const { tenantId, initialUsername, initialPassword } = event;
         console.log(`[Auth Service] Received tenant-created event for: ${tenantId}`);
 
         try {
-          const safeTenantId = db.escapeIdentifier(tenantId);
+            await reconcileTenantSchema(event.tenantId);
 
-          // 1. Create the schema
-          await db.adminQuery(`CREATE SCHEMA IF NOT EXISTS ${safeTenantId}`);
-          console.log(`> Schema '${tenantId}' created.`);
-
-          // 2. Create the standard 'users' table
-          const createUsersTableSql = `CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
-          await db.query(tenantId, createUsersTableSql, []);
-          console.log(`> Table 'users' created for tenant '${tenantId}'.`);
-
-          // 3. Create the new 'superusers' table
-          const createSuperusersTableSql = `CREATE TABLE superusers (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`;
-          await db.query(tenantId, createSuperusersTableSql, []);
-          console.log(`> Table 'superusers' created for tenant '${tenantId}'.`);
-
-          // 4. If initial user details are provided, create the superuser
-          if (initialUsername && initialPassword) {
-            const saltRounds = 10;
-            const hashedPassword = await bcrypt.hash(initialPassword, saltRounds);
-            const insertSuperuserSql = 'INSERT INTO superusers (username, password) VALUES ($1, $2)';
-            await db.query(tenantId, insertSuperuserSql, [initialUsername, hashedPassword]);
-            console.log(`> Initial superuser '${initialUsername}' created for tenant '${tenantId}'.`);
-          }
+            if (initialUsername && initialPassword) {
+                const saltRounds = 10;
+                const hashedPassword = await bcrypt.hash(initialPassword, saltRounds);
+                const insertSuperuserSql = 'INSERT INTO superusers (username, password) VALUES ($1, $2)';
+                await db.query(tenantId, insertSuperuserSql, [initialUsername, hashedPassword]);
+                console.log(`> Initial superuser '${initialUsername}' created for tenant '${tenantId}'.`);
+            }
         } catch (err) {
-          console.error(`[Auth Service] FAILED to provision schema/user for tenant ${tenantId}:`, err);
+            console.error(`[Auth Service] FAILED to process tenant-created event for ${tenantId}. Reason:`, err);
         }
         return;
       }
 
-      // --- Handle Tenant Deletion ---
       if (topic === TENANT_DELETED_TOPIC) {
         const { tenantId } = event;
         console.log(`[Auth Service] Received tenant-deleted event for: ${tenantId}`);
@@ -327,5 +401,4 @@ const sendDbTaskEvent = async (taskPayload) => {
 };
 
 
-
-module.exports = { connect, disconnect, sendUserCreationRequest, sendMigrationEvent, sendDbTaskEvent };
+module.exports = { connect, disconnect, sendUserCreationRequest, sendMigrationEvent, sendDbTaskEvent, reconcileTenantSchema, buildCreateTableSql };

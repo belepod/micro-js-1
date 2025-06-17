@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('./db');
 const kafka = require('./kafka');
+const { reconcileTenantSchema } = require('./kafka');
 
 const app = express();
 app.use(express.json());
@@ -81,6 +82,54 @@ app.post('/admin/migrations/run-task', async (req, res) => {
     }
 });
 
+// --- NEW DIRECT AND SYNCHRONOUS RECONCILIATION ENDPOINT ---
+app.post('/admin/reconcile-all-tenants', async (req, res) => {
+    // In a real app, this MUST be protected by strong admin authentication.
+    console.log('[Admin] Received request to reconcile all tenants...');
+    
+    const results = {
+        successful: [],
+        failed: []
+    };
+
+    try {
+        // Step 1: Get all tenant schemas directly from this service's database.
+        // This query finds all schemas that are not system-managed.
+        const tenantsResult = await db.adminQuery(
+            "SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname NOT IN ('public', 'root', 'information_schema') AND nspname NOT LIKE 'pg_%';"
+        );
+        const allTenants = tenantsResult.rows.map(r => r.nspname);
+        
+        if (allTenants.length === 0) {
+            return res.status(200).json({ message: 'No tenants found to reconcile.' });
+        }
+
+        console.log(`[Admin] Found ${allTenants.length} tenants. Starting reconciliation loop.`);
+
+        // Step 2: Loop through each tenant and run the reconciliation sequentially.
+        // A for...of loop is used to handle async/await correctly one-by-one.
+        for (const tenantId of allTenants) {
+            try {
+                await reconcileTenantSchema(tenantId);
+                results.successful.push(tenantId);
+            } catch (err) {
+                console.error(`[Admin] FAILED to reconcile tenant '${tenantId}':`, err.message);
+                results.failed.push({ tenantId: tenantId, error: err.message });
+            }
+        }
+
+        console.log('[Admin] Reconciliation process complete.');
+        // Step 3: Return a detailed report.
+        res.status(200).json({
+            status: results.failed.length > 0 ? 'Completed with errors' : 'Completed successfully',
+            ...results
+        });
+
+    } catch (err) {
+        console.error('[Admin] A critical error occurred during the reconciliation process:', err);
+        res.status(500).send({ error: 'A critical error stopped the reconciliation process.' });
+    }
+});
 
 
 const PORT = 3000;
