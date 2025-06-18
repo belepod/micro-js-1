@@ -1,8 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: 'http://localhost:3003', // Our tenant-manager URL
-    withCredentials: true, // IMPORTANT: This sends the session cookie
+    baseURL: '/api', 
+    withCredentials: true,
 });
 
 export const login = (username, password) => api.post('/login', { username, password });
