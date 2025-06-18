@@ -12,4 +12,6 @@ COPY auth-service/src ./src
 # --- NEW: Explicitly copy the shared schemas ---
 COPY avro-schemas ./avro-schemas
 
+COPY auth-service/init.sql ./init.sql
+
 CMD [ "npm", "start" ]

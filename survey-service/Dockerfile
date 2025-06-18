@@ -12,4 +12,6 @@ COPY survey-service/src ./src
 # --- NEW: Explicitly copy the shared schemas ---
 COPY avro-schemas ./avro-schemas
 
+COPY survey-service/init.sql ./init.sql
+
 CMD [ "npm", "start" ]
