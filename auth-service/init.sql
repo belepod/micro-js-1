@@ -20,7 +20,6 @@ CREATE TABLE root.schema_columns (
     UNIQUE(table_name, column_name)
 );
 
-
 INSERT INTO root.schema_tables (table_name, description) VALUES ('users', 'Standard application users for a tenant.');
 INSERT INTO root.schema_columns (table_name, column_name, data_type, is_nullable, is_primary_key) VALUES ('users', 'id', 'SERIAL', false, true);
 INSERT INTO root.schema_columns (table_name, column_name, data_type, is_nullable, is_unique) VALUES ('users', 'username', 'VARCHAR(255)', false, true);

@@ -1,31 +1,25 @@
 const { Kafka } = require('kafkajs');
 const { SchemaRegistry } = require('@kafkajs/confluent-schema-registry');
 const db = require('./db');
+const axios = require('axios');
 
 const kafka = new Kafka({
   clientId: 'survey-service',
   brokers: [process.env.KAFKA_BROKER],
 });
 
-// Needs both a producer and a consumer
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: 'survey-group' });
 
 const registry = new SchemaRegistry({ host: process.env.SCHEMA_REGISTRY_URL });
 
-//const processingStatusSchema = require('../avro-schemas/processing-status.avsc');
 
 const fs = require('fs');
 const path = require('path');
 
-// const schemaPath = path.join(__dirname, '../avro-schemas/processing-status.avsc');
-// const processingStatusSchema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
 
 const processingStatusSchema = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../avro-schemas/processing-status.avsc'), 'utf-8')
-);
-const schemaUpdatedSchema = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../avro-schemas/schema-updated.avsc'), 'utf-8')
 );
 
 
@@ -33,7 +27,7 @@ const TENANT_CREATED_TOPIC = 'tenant-created';
 const TENANT_DELETED_TOPIC = 'tenant-deleted';
 const TENANT_RENAMED_TOPIC = 'tenant-renamed';
 const USER_CREATED_TOPIC = 'user-created';
-const SCHEMA_UPDATED_TOPIC = 'schema-updated';
+
 
 
 function buildCreateTableSql(tableDefinition) {
@@ -56,11 +50,6 @@ function buildCreateTableSql(tableDefinition) {
 }
 
 
-/**
- * The full, state-diffing reconciler. This function compares the desired state
- * in the 'root' schema with the actual state in the tenant's schema and
- * generates CREATE/ALTER/DROP statements to make them match.
- */
 async function reconcileTenantSchema(tenantId) {
     console.log(`[Reconciler] Starting full schema reconciliation for tenant: ${tenantId}`);
     const safeTenantId = db.escapeIdentifier(tenantId);
@@ -144,8 +133,7 @@ const connect = async () => {
       TENANT_CREATED_TOPIC,
       TENANT_DELETED_TOPIC,
       TENANT_RENAMED_TOPIC,
-      USER_CREATED_TOPIC,
-      SCHEMA_UPDATED_TOPIC
+      USER_CREATED_TOPIC
     ], 
     fromBeginning: true 
   });
@@ -163,29 +151,6 @@ const connect = async () => {
         console.error(`[Survey Service] Failed to decode message on topic ${topic}:`, e);
         return;
       }
-              if (topic === SCHEMA_UPDATED_TOPIC) {
-            // Is this event for me?
-            if (event.serviceName !== 'survey-service') {
-                return;
-            }
-            console.log('[Auth Service] Schema update event received. Reconciling all tenants.');
-            try {
-                // Fetch the list of all tenants this service is responsible for
-                // For simplicity, we assume this service owns all tenants in its DB
-                // This could also be fetched from the tenant-manager
-                const tenantsResult = await db.adminQuery("SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname NOT IN ('public', 'root', 'information_schema') AND nspname NOT LIKE 'pg_%';");
-                const allTenants = tenantsResult.rows.map(r => r.nspname);
-                
-                for (const tenantId of allTenants) {
-                    await reconcileTenantSchema(tenantId);
-                }
-                console.log('[Auth Service] All tenants have been reconciled to the latest schema.');
-            } catch (err) {
-                console.error('[Auth Service] Critical failure during schema reconciliation process:', err);
-            }
-            return;
-        }
-      // --- Handle Tenant Creation ---
       if (topic === TENANT_CREATED_TOPIC) {
         const { tenantId } = event;
         console.log(`[Survey Service] Received tenant-created event for: ${tenantId}`);
@@ -197,7 +162,6 @@ const connect = async () => {
         return;
       }
 
-      // --- Handle Tenant Deletion ---
       if (topic === TENANT_DELETED_TOPIC) {
         const { tenantId } = event;
         console.log(`[Survey Service] Received tenant-deleted event for: ${tenantId}`);
@@ -211,7 +175,6 @@ const connect = async () => {
         return;
       }
       
-      // --- Handle Tenant Renaming ---
       if (topic === TENANT_RENAMED_TOPIC) {
         const { oldTenantId, newTenantId } = event;
         console.log(`[Survey Service] Received tenant-renamed event from '${oldTenantId}' to '${newTenantId}'`);
@@ -226,7 +189,6 @@ const connect = async () => {
         return;
       }
 
-      // --- Handle User Creation and Send Reply ---
       if (topic === USER_CREATED_TOPIC) {
         const { tenantId, userId, username, correlationId, replyTopic } = event;
         let status = 'FAILURE';
@@ -242,13 +204,11 @@ const connect = async () => {
 
                 const replyMessage = { correlationId, status };
         
-        // Register the reply schema
         const { id: schemaId } = await registry.register(
             { type: 'AVRO', schema: JSON.stringify(processingStatusSchema) },
             { subject: `${replyTopic}-value` } // e.g., 'processing-status-value'
         );
         
-        // ENCODE the reply payload
         const encodedReply = await registry.encode(schemaId, replyMessage);
 
 
@@ -267,4 +227,4 @@ const disconnect = async () => {
   await consumer.disconnect();
 };
 
-module.exports = { connect, disconnect };
+module.exports = { connect, disconnect, reconcileTenantSchema, buildCreateTableSql  };

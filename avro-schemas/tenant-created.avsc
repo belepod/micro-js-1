@@ -4,7 +4,6 @@
   "namespace": "com.mycompany.events",
   "fields": [
     { "name": "tenantId", "type": "string" },
-    { "name": "initialUsername", "type": ["null", "string"], "default": null },
-    { "name": "initialPassword", "type": ["null", "string"], "default": null }
+    { "name": "initialUserData", "type": ["null", { "type": "map", "values": "string" }], "default": null }
   ]
 }

@@ -8,24 +8,37 @@ const pool = new Pool({
   port: 5432,
 });
 
-const escapeIdentifier = (str) => `"${str.replace(/"/g, '""')}"`;
+function escapeIdentifier(str) {
+  return '"' + str.replace(/"/g, '""') + '"';
+}
 
-const query = async (tenantId, text, params) => {
+async function query(tenantId, sql, params) {
+  if (!tenantId) {
+    throw new Error('A tenantId is required for tenant-specific queries.');
+  }
+
   const client = await pool.connect();
   try {
-    await client.query(`SET search_path TO ${escapeIdentifier(tenantId)}, public`);
-    return await client.query(text, params);
+    const safeTenantId = escapeIdentifier(tenantId);
+    await client.query(`SET search_path TO ${safeTenantId}, public;`);
+    return await client.query(sql, params);
   } finally {
     client.release();
   }
-};
+}
 
-const adminQuery = (text, params) => {
-    return pool.query(text, params);
-};
+async function adminQuery(sql, params) {
+  const client = await pool.connect();
+  try {
+    return await client.query(sql, params);
+  } finally {
+    client.release();
+  }
+}
 
 module.exports = {
   query,
   adminQuery,
   escapeIdentifier,
+  pool,
 };

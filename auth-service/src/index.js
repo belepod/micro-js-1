@@ -1,40 +1,85 @@
 const express = require('express');
 const db = require('./db');
+const bcrypt = require('bcrypt');
 const kafka = require('./kafka');
 const { reconcileTenantSchema } = require('./kafka');
+const {sendUserCreationRequest} = require('./kafka')
+const { buildDynamicInsertQuery } = require('./dbUtils');
 
 const app = express();
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.send(`Auth Service v${pjson.version}`);
+});
+
 app.post('/register', async (req, res) => {
   const tenantId = req.headers['x-tenant-id'];
   if (!tenantId) {
-      return res.status(400).send('X-Tenant-ID header is required.');
+    return res.status(400).json({ error: 'X-Tenant-ID header is required.' });
   }
 
-  const { username, password, name } = req.body;
-  if (!username || !password) {
-    return res.status(400).send('Username and password are required');
+  const requestData = { ...req.body };
+
+  if (!requestData.username || !requestData.password) {
+    return res.status(400).json({ error: 'Username and password are required.' });
   }
 
   try {
-    const result = await db.query(tenantId,
-      'INSERT INTO users(username, password) VALUES($1, $2) RETURNING id, username',
-      [username, password]
-    );
-    const newUser = result.rows[0];
-
-    // Call the request-reply function. It will handle the response.
-    await kafka.sendUserCreationRequest(tenantId, newUser, res);
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(requestData.password, saltRounds);
+    requestData.password = hashedPassword;
     
-    // DO NOT send a response here. kafka.js will do it when the reply arrives.
+    const { sql, values } = await buildDynamicInsertQuery(tenantId, 'users', requestData);
 
+    const { rows } = await db.query(tenantId, sql, values);
+
+    const newUser = rows[0];
+    delete newUser.password;
+
+    res.status(201).json(newUser);
   } catch (err) {
-    console.error(`Error registering user for tenant ${tenantId}:`, err);
-    if (err.code === '42P01') { 
-        return res.status(404).send({ error: `Tenant '${tenantId}' does not exist.` });
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Username already exists.' });
     }
-    res.status(500).send('Error registering user');
+    console.error(`Registration failed for tenant ${tenantId}:`, err);
+    res.status(500).json({ error: 'Registration failed.', details: err.message });
+  }
+});
+
+app.post('/tables/:tableName/rows', async (req, res) => {
+  const { tableName } = req.params;
+  const tenantId = req.headers['x-tenant-id'];
+
+  if (!tenantId) {
+    return res.status(400).json({ error: 'X-Tenant-ID header is required.' });
+  }
+
+  const requestData = { ...req.body };
+
+  try {
+    if (requestData.password) {
+      const saltRounds = 10;
+      const hashedPassword = await bcrypt.hash(requestData.password, saltRounds);
+      requestData.password = hashedPassword;
+    }
+    
+    const { sql, values } = await buildDynamicInsertQuery(tenantId, tableName, requestData);
+    
+    const { rows } = await db.query(tenantId, sql, values);
+
+    const newRow = rows[0];
+    if (newRow.password) {
+        delete newRow.password;
+    }
+
+    res.status(201).json(newRow);
+  } catch (err) {
+    if (err.code === '23505') { // Handles UNIQUE constraint violations
+      return res.status(409).json({ error: `A record with one of the unique fields already exists in table '${tableName}'.` });
+    }
+    console.error(`Insert failed for tenant ${tenantId}, table ${tableName}:`, err);
+    res.status(500).json({ error: 'Insert failed.', details: err.message });
   }
 });
 
@@ -52,39 +97,8 @@ app.get('/users', async (req, res) => {
     }
 });
 
-app.post('/admin/migrations/run', async (req, res) => {
-    // SECURITY In a real-world application, this endpoint MUST be protected
-    // and only accessible to administrators.
-    try {
-        // This just publishes the event. The actual work happens in the consumer.
-        await kafka.sendMigrationEvent();
-        res.status(202).send({ 
-            message: "Database migration process for all tenants has been initiated. Check service logs for progress." 
-        });
-    } catch (err) {
-        console.error("Failed to trigger migration event:", err);
-        res.status(500).send({ error: "Could not start migration process." });
-    }
-});
 
-// The single, powerful endpoint
-app.post('/admin/migrations/run-task', async (req, res) => {
-    // This endpoint now acts as a simple gateway to publish the task event.
-    // The real work happens in the consumer.
-    // NOTE: Add validation here to ensure the payload is well-formed.
-    const taskPayload = req.body;
-    try {
-        await kafka.sendDbTaskEvent(taskPayload);
-        res.status(202).send({ message: `DB Task of type '${taskPayload.taskType}' has been initiated. Check service logs.` });
-    } catch (err) {
-        console.error("Failed to trigger DB Task event:", err);
-        res.status(500).send({ error: "Could not start DB Task process." });
-    }
-});
-
-// --- NEW DIRECT AND SYNCHRONOUS RECONCILIATION ENDPOINT ---
 app.post('/admin/reconcile-all-tenants', async (req, res) => {
-    // In a real app, this MUST be protected by strong admin authentication.
     console.log('[Admin] Received request to reconcile all tenants...');
     
     const results = {
@@ -93,8 +107,6 @@ app.post('/admin/reconcile-all-tenants', async (req, res) => {
     };
 
     try {
-        // Step 1: Get all tenant schemas directly from this service's database.
-        // This query finds all schemas that are not system-managed.
         const tenantsResult = await db.adminQuery(
             "SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname NOT IN ('public', 'root', 'information_schema') AND nspname NOT LIKE 'pg_%';"
         );
@@ -106,8 +118,6 @@ app.post('/admin/reconcile-all-tenants', async (req, res) => {
 
         console.log(`[Admin] Found ${allTenants.length} tenants. Starting reconciliation loop.`);
 
-        // Step 2: Loop through each tenant and run the reconciliation sequentially.
-        // A for...of loop is used to handle async/await correctly one-by-one.
         for (const tenantId of allTenants) {
             try {
                 await reconcileTenantSchema(tenantId);
@@ -119,7 +129,6 @@ app.post('/admin/reconcile-all-tenants', async (req, res) => {
         }
 
         console.log('[Admin] Reconciliation process complete.');
-        // Step 3: Return a detailed report.
         res.status(200).json({
             status: results.failed.length > 0 ? 'Completed with errors' : 'Completed successfully',
             ...results
