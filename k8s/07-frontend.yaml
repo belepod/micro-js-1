@@ -1,0 +1,26 @@
+# --- Admin Panel (Frontend) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-panel-deployment
+  namespace: tenant-app
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: admin-panel } }
+  template:
+    metadata: { labels: { app: admin-panel } }
+    spec:
+      containers:
+        - name: admin-panel
+          image: belepod/admin-panel:v1.0
+          imagePullPolicy: Always
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-panel-service
+  namespace: tenant-app
+spec:
+  selector: { app: admin-panel }
+  ports: [{ port: 80 }]

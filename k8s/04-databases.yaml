@@ -1,0 +1,122 @@
+# --- Tenant DB ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-db-deployment
+  namespace: tenant-app
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: tenant-db } }
+  template:
+    metadata: { labels: { app: tenant-db } }
+    spec:
+      containers:
+        - name: tenant-db
+          image: postgres:14-alpine
+          ports: [{ containerPort: 5432 }]
+          env:
+            - name: POSTGRES_DB
+              value: "tenant_db"
+          envFrom:
+            - configMapRef: { name: tenant-app-config }
+            - secretRef: { name: tenant-app-secrets }
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: tenant-db-storage
+            - mountPath: /docker-entrypoint-initdb.d
+              name: tenant-db-init-scripts
+      volumes:
+        - name: tenant-db-storage
+          persistentVolumeClaim: { claimName: tenant-db-pvc }
+        - name: tenant-db-init-scripts
+          configMap:
+            name: tenant-db-init-cm # We will create this ConfigMap from the file
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tenant-db-service
+  namespace: tenant-app
+spec:
+  selector: { app: tenant-db }
+  ports: [{ port: 5432 }]
+
+# --- Auth DB (similar structure) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: auth-db-deployment, namespace: tenant-app }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: auth-db } }
+  template:
+    metadata: { labels: { app: auth-db } }
+    spec:
+      containers:
+        - name: auth-db
+          image: postgres:14-alpine
+          ports: [{ containerPort: 5432 }]
+          env:
+            - name: POSTGRES_DB
+              value: "auth_db"
+          envFrom:
+            - configMapRef: { name: tenant-app-config }
+            - secretRef: { name: tenant-app-secrets }
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: auth-db-storage
+            - mountPath: /docker-entrypoint-initdb.d
+              name: auth-db-init-scripts
+      volumes:
+        - name: auth-db-storage
+          persistentVolumeClaim: { claimName: auth-db-pvc }
+        - name: auth-db-init-scripts
+          configMap:
+            name: auth-db-init-cm
+---
+apiVersion: v1
+kind: Service
+metadata: { name: auth-db-service, namespace: tenant-app }
+spec:
+  selector: { app: auth-db }
+  ports: [{ port: 5432 }]
+
+# --- Survey DB (similar structure) ---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: survey-db-deployment, namespace: tenant-app }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: survey-db } }
+  template:
+    metadata: { labels: { app: survey-db } }
+    spec:
+      containers:
+        - name: survey-db
+          image: postgres:14-alpine
+          ports: [{ containerPort: 5432 }]
+          env:
+            - name: POSTGRES_DB
+              value: "survey_db"
+          envFrom:
+            - configMapRef: { name: tenant-app-config }
+            - secretRef: { name: tenant-app-secrets }
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: survey-db-storage
+            - mountPath: /docker-entrypoint-initdb.d
+              name: survey-db-init-scripts
+      volumes:
+        - name: survey-db-storage
+          persistentVolumeClaim: { claimName: survey-db-pvc }
+        - name: survey-db-init-scripts
+          configMap:
+            name: survey-db-init-cm
+---
+apiVersion: v1
+kind: Service
+metadata: { name: survey-db-service, namespace: tenant-app }
+spec:
+  selector: { app: survey-db }
+  ports: [{ port: 5432 }]
+# ... Create Deployment and Service for survey-db, pointing to survey-db-pvc and a survey-db-init-cm

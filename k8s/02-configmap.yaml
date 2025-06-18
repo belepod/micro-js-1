@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-app-config
+  namespace: tenant-app
+data:
+  POSTGRES_USER: "user"
+  KAFKA_BROKER: "kafka-service.tenant-app.svc.cluster.local:9092"
+  SCHEMA_REGISTRY_URL: "http://schema-registry-service.tenant-app.svc.cluster.local:8081"
+  ADMIN_USER: "admin"
