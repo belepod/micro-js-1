@@ -82,6 +82,8 @@ spec:
             value: "zookeeper-service.tenant-app.svc.cluster.local:2181"
           - name: SCHEMA_REGISTRY_LISTENERS
             value: "http://0.0.0.0:8081"
+          - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+            value: "PLAINTEXT://kafka-service.tenant-app.svc.cluster.local:9092"
 ---
 apiVersion: v1
 kind: Service
