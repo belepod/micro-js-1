@@ -1,4 +1,3 @@
-# --- Tenant DB ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,7 +40,7 @@ spec:
   selector: { app: tenant-db }
   ports: [{ port: 5432 }]
 
-# --- Auth DB (similar structure) ---
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: auth-db-deployment, namespace: tenant-app }
@@ -80,8 +79,7 @@ spec:
   selector: { app: auth-db }
   ports: [{ port: 5432 }]
 
-# --- Survey DB (similar structure) ---
-
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: survey-db-deployment, namespace: tenant-app }
@@ -119,4 +117,3 @@ metadata: { name: survey-db-service, namespace: tenant-app }
 spec:
   selector: { app: survey-db }
   ports: [{ port: 5432 }]
-# ... Create Deployment and Service for survey-db, pointing to survey-db-pvc and a survey-db-init-cm
