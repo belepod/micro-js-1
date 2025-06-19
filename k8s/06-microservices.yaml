@@ -15,8 +15,10 @@ spec:
           imagePullPolicy: Always
           ports: [{ containerPort: 3000 }]
           env:
-            - { name: POSTGRES_HOST, value: "tenant-db-service.tenant-app.svc.cluster.local" }
-            - { name: POSTGRES_DB, value: "tenant_db" }
+          - name: POSTGRES_HOST
+            value: "tenant-db-service.tenant-app.svc.cluster.local"
+          - name: POSTGRES_DB
+            value: "tenant_db"
           envFrom:
             - configMapRef: { name: tenant-app-config }
             - secretRef: { name: tenant-app-secrets }
@@ -46,8 +48,10 @@ spec:
           imagePullPolicy: Always
           ports: [{ containerPort: 3000 }]
           env:
-            - { name: POSTGRES_HOST, value: "auth-db-service.tenant-app.svc.cluster.local" }
-            - { name: POSTGRES_DB, value: "auth_db" }
+          - name: POSTGRES_HOST
+            value: "auth-db-service.tenant-app.svc.cluster.local"
+          - name: POSTGRES_DB
+            value: "auth_db"
           envFrom:
             - configMapRef: { name: tenant-app-config }
             - secretRef: { name: tenant-app-secrets }
@@ -75,8 +79,10 @@ spec:
           imagePullPolicy: Always
           ports: [{ containerPort: 3000 }]
           env:
-            - { name: POSTGRES_HOST, value: "survey-db-service.tenant-app.svc.cluster.local" }
-            - { name: POSTGRES_DB, value: "survey_db" }
+          - name: POSTGRES_HOST
+            value: "survey-db-service.tenant-app.svc.cluster.local"
+          - name: POSTGRES_DB
+            value: "survey_db"
           envFrom:
             - configMapRef: { name: tenant-app-config }
             - secretRef: { name: tenant-app-secrets }
